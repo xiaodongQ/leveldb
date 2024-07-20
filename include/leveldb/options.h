@@ -31,6 +31,7 @@ enum CompressionType {
 };
 
 // Options to control the behavior of a database (passed to DB::Open)
+// 选项用于控制leveldb数据库的行为，传入时机是DB::Open的时候
 struct LEVELDB_EXPORT Options {
   // Create an Options object with default values for all fields.
   Options();

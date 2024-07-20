@@ -18,6 +18,7 @@ namespace leveldb {
 static const int kMajorVersion = 1;
 static const int kMinorVersion = 23;
 
+// 基本选项，用于DB::Open
 struct Options;
 struct ReadOptions;
 struct WriteOptions;
@@ -63,6 +64,7 @@ class LEVELDB_EXPORT DB {
   // Set the database entry for "key" to "value".  Returns OK on success,
   // and a non-OK status on error.
   // Note: consider setting options.sync = true.
+  // 纯虚函数，需要实现
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& value) = 0;
 
