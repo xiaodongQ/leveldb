@@ -48,6 +48,7 @@ struct DBImpl::Writer {
   WriteBatch* batch;
   bool sync;
   bool done;
+  // 封装了 std::condition_variable，添加了线程安全
   port::CondVar cv;
 };
 
@@ -1198,21 +1199,29 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
 }
 
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
+  // 构造 Writer 实例
   Writer w(&mutex_);
   w.batch = updates;
   w.sync = options.sync;
   w.done = false;
 
+  // RAII特性，构造时lock，析构时unlock
   MutexLock l(&mutex_);
+  // 这里的writers_是 std::deque 双端队列
   writers_.push_back(&w);
   while (!w.done && &w != writers_.front()) {
+    // 线程安全地等待条件变量，直到被唤醒
     w.cv.Wait();
   }
+  // 到这里说明被唤醒了
+  // 继续判断，若其他线程设置 Writer已结束 则返回
   if (w.done) {
     return w.status;
   }
 
   // May temporarily unlock and wait.
+  // 声明为：Status DBImpl::MakeRoomForWrite(bool force)，若传入 WriteBatch* 为NULL则强制写，即不允许延迟写
+  // 调用 MakeRoomForWrite 前必定已持锁，里面会断言判断
   Status status = MakeRoomForWrite(updates == nullptr);
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
@@ -1323,6 +1332,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
 // REQUIRES: mutex_ is held
 // REQUIRES: this thread is currently at the front of the writer queue
 Status DBImpl::MakeRoomForWrite(bool force) {
+  // 要求外面肯定是持锁的，这里加了断言
   mutex_.AssertHeld();
   assert(!writers_.empty());
   bool allow_delay = !force;
@@ -1334,6 +1344,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       break;
     } else if (allow_delay && versions_->NumLevelFiles(0) >=
                                   config::kL0_SlowdownWritesTrigger) {
+      // 若允许延迟写，但Level0的文件数超出限制（默认为8），则不延迟写
+
       // We are getting close to hitting a hard limit on the number of
       // L0 files.  Rather than delaying a single write by several
       // seconds when we hit the hard limit, start delaying each
@@ -1480,6 +1492,7 @@ void DBImpl::GetApproximateSizes(const Range* range, int n, uint64_t* sizes) {
 
 // Default implementations of convenience methods that subclasses of DB
 // can call if they wish
+// 基类DB的接口默认实现，子类也可直接使用，或者重写
 Status DB::Put(const WriteOptions& opt, const Slice& key, const Slice& value) {
   WriteBatch batch;
   batch.Put(key, value);

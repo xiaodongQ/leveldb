@@ -48,7 +48,9 @@ char* EncodeVarint32(char* dst, uint32_t v) {
 
 void PutVarint32(std::string* dst, uint32_t v) {
   char buf[5];
+  // 将传入的`v`进行编码
   char* ptr = EncodeVarint32(buf, v);
+  // std::string append追加
   dst->append(buf, ptr - buf);
 }
 
@@ -70,7 +72,9 @@ void PutVarint64(std::string* dst, uint64_t v) {
 }
 
 void PutLengthPrefixedSlice(std::string* dst, const Slice& value) {
+  // append长度
   PutVarint32(dst, value.size());
+  // append数据
   dst->append(value.data(), value.size());
 }
 

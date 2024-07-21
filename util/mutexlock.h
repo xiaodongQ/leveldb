@@ -20,6 +20,7 @@ namespace leveldb {
 //     ... some complex code, possibly with multiple return paths ...
 //   }
 
+// RAII，构造时lock，析构时unlock
 class SCOPED_LOCKABLE MutexLock {
  public:
   explicit MutexLock(port::Mutex* mu) EXCLUSIVE_LOCK_FUNCTION(mu) : mu_(mu) {

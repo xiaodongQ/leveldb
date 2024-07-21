@@ -56,7 +56,32 @@ class LOCKABLE Mutex {
   Mutex(const Mutex&) = delete;
   Mutex& operator=(const Mutex&) = delete;
 
+  /* 
+    `__attribute__` 是 GCC（GNU 编译器集合）提供的一种机制，用于设置函数、变量、类型或结构的特定属性。
+    通过这些属性，你可以优化代码、生成警告或者改变默认的编译行为。
+    一些常用属性：
+      函数属性
+        `aligned(alignment)`: 指定函数的对齐方式
+        `noinline`: 禁止函数内联
+        `packed`：表明函数的返回值或参数结构需要紧凑排列，不要对其成员进行对齐
+      变量属性
+        `packed`: 表明变量结构需要紧凑排列
+        `section("section_name")`: 指定变量放置在特定的段中
+        `visibility("visibility_type")`: 控制符号在共享库中的可见性
+  */
+  // 通过`__attribute__`来设置`exclusive_lock_function`属性
+  // `exclusive_lock_function` 是 GCC 中的一个函数属性，用于指定函数将获取一个独占锁（exclusive lock），这通常是指一个不会被多个线程同时持有的锁。
+  // `exclusive_lock_function` 属性告知编译器，当调用该函数时，函数会获取一个特定的锁。这有助于编译器进行静态分析，确保程序的线程安全性。
+  /*
+
+    设置属性（如 `exclusive_lock_function` 和 `unlock_function`）并不是强制性的，但它们确实可以为你的代码提供额外的好处，特别是在大型代码库和多线程环境中。
+    以下是一些使用这些属性来为加锁和解锁函数提供标注的原因：
+    1、提高代码的可读性和维护性，让其他开发者更容易理解代码
+    2、静态分析和检查，这些属性能帮助编译器和静态分析工具更好地理解你的代码结构
+    是否使用这些属性取决于你代码的复杂性和团队的开发规范。在简单的项目或小型团队中，手动管理锁的获取和释放可能已经足够。但在大型项目中，属性的使用能显著提高代码的可靠性和可维护性。
+  */
   void Lock() EXCLUSIVE_LOCK_FUNCTION() { mu_.lock(); }
+  // UNLOCK_FUNCTION会设置 unlock_function 属性
   void Unlock() UNLOCK_FUNCTION() { mu_.unlock(); }
   void AssertHeld() ASSERT_EXCLUSIVE_LOCK() {}
 
@@ -66,6 +91,11 @@ class LOCKABLE Mutex {
 };
 
 // Thinly wraps std::condition_variable.
+// 封装了 std::condition_variable，确保了线程安全的等待与通知机制。
+/*
+  `std::condition_variable`是C++11标准库中提供的一种线程同步机制，用于多线程环境下的条件变量。它允许一个线程等待某个条件的变化，并在条件满足时进行通知。
+  `std::condition_variable`与互斥锁（`std::mutex`）配合使用，以确保线程间安全地修改可共享的状态。
+*/
 class CondVar {
  public:
   explicit CondVar(Mutex* mu) : mu_(mu) { assert(mu != nullptr); }
@@ -75,11 +105,19 @@ class CondVar {
   CondVar& operator=(const CondVar&) = delete;
 
   void Wait() {
+    // std::adopt_lock 定义时即加锁
     std::unique_lock<std::mutex> lock(mu_->mu_, std::adopt_lock);
+    // 等待条件变量，直到其他线程通过Signal或SignalAll唤醒它
+    // 在等待过程中，lock会被临时释放，允许其他线程访问被保护的资源
     cv_.wait(lock);
+    // 调用lock.release()是在wait返回后释放锁的一种不常见方式。
+    // 实际上，在此上下文中，由于std::unique_lock会在其作用域结束时自动释放锁，这里的release调用是冗余的
+    // 一般让 std::unique_lock自动管理锁的生命周期即可，无需手动调用release
     lock.release();
   }
+  // 唤醒一个正在等待该条件变量的线程，哪个线程被唤醒是不确定的，由实现决定。
   void Signal() { cv_.notify_one(); }
+  // 唤醒所有等待该条件变量的线程
   void SignalAll() { cv_.notify_all(); }
 
  private:

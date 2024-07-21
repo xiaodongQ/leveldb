@@ -84,6 +84,7 @@ int WriteBatchInternal::Count(const WriteBatch* b) {
 }
 
 void WriteBatchInternal::SetCount(WriteBatch* b, int n) {
+  // 0-7 第8位开始的
   EncodeFixed32(&b->rep_[8], n);
 }
 
@@ -96,15 +97,23 @@ void WriteBatchInternal::SetSequence(WriteBatch* b, SequenceNumber seq) {
 }
 
 void WriteBatch::Put(const Slice& key, const Slice& value) {
+  // 向WriteBatch实例计数加1
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
+  // 串行新增一个字节(char)，表示操作类型。只有两种取值：kTypeDeletion = 0x0, kTypeValue = 0x1，此处为`kTypeValue`类型
   rep_.push_back(static_cast<char>(kTypeValue));
+
+  // 向rep_追加（append）key的长度和数据
   PutLengthPrefixedSlice(&rep_, key);
+  // 向rep_追加（append）value的长度和数据
   PutLengthPrefixedSlice(&rep_, value);
 }
 
 void WriteBatch::Delete(const Slice& key) {
+  // 向WriteBatch实例计数加1
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
+  // 串行新增操作类型，此处为`kTypeDeletion`类型
   rep_.push_back(static_cast<char>(kTypeDeletion));
+  // 只追加key的长度和数据
   PutLengthPrefixedSlice(&rep_, key);
 }
 

@@ -54,6 +54,7 @@ char* EncodeVarint64(char* dst, uint64_t value);
 inline void EncodeFixed32(char* dst, uint32_t value) {
   uint8_t* const buffer = reinterpret_cast<uint8_t*>(dst);
 
+  // 4字节编码
   // Recent clang and gcc optimize this to a single mov / str instruction.
   buffer[0] = static_cast<uint8_t>(value);
   buffer[1] = static_cast<uint8_t>(value >> 8);

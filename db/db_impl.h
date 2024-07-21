@@ -171,6 +171,7 @@ class DBImpl : public DB {
   FileLock* db_lock_;
 
   // State below is protected by mutex_
+  // 下面很多内容都由此mutex负责并发保护， 包装了一层 std::mutex
   port::Mutex mutex_;
   std::atomic<bool> shutting_down_;
   port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
@@ -182,6 +183,14 @@ class DBImpl : public DB {
   log::Writer* log_;
   uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
+  /*
+    `deque`
+      双端操作：支持在序列的两端常数时间复杂度（ `O(1)` ）内插入和删除元素。（不需要移动整个容器）
+      随机访问：支持快速的随机访问，通过下标 `[]` 或 `at()` 方法访问元素。
+      动态大小：能够根据需要自动调整大小，不需要手动管理内存。
+      不连续存储：内部实现通常不是一个连续的内存块，而是多个小块的集合，以优化双端操作。
+  */
+  // `Writer*`的双端队列
   // Queue of writers.
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
