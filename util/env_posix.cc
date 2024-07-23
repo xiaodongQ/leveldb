@@ -757,6 +757,7 @@ class PosixEnv : public Env {
   // background thread.
   //
   // This structure is thread-safe because it is immutable.
+  // 任务结构，里面包含一个处理函数以及一个void*参数
   struct BackgroundWorkItem {
     explicit BackgroundWorkItem(void (*function)(void* arg), void* arg)
         : function(function), arg(arg) {}
@@ -766,9 +767,11 @@ class PosixEnv : public Env {
   };
 
   port::Mutex background_work_mutex_;
+  // 条件变量，用于下面的 background_work_queue_ 队列通知
   port::CondVar background_work_cv_ GUARDED_BY(background_work_mutex_);
   bool started_background_thread_ GUARDED_BY(background_work_mutex_);
 
+  // PosixEnv类的成员变量，任务队列
   std::queue<BackgroundWorkItem> background_work_queue_
       GUARDED_BY(background_work_mutex_);
 
@@ -812,26 +815,31 @@ PosixEnv::PosixEnv()
       fd_limiter_(MaxOpenFiles()) {}
 
 void PosixEnv::Schedule(
-    void (*background_work_function)(void* background_work_arg),
-    void* background_work_arg) {
+    void (*background_work_function)(void* background_work_arg), // 函数入参，这里是个函数指针
+    void* background_work_arg) {  // 函数入参
   background_work_mutex_.Lock();
 
   // Start the background thread, if we haven't done so already.
   if (!started_background_thread_) {
     started_background_thread_ = true;
+    // 起一个detach线程
     std::thread background_thread(PosixEnv::BackgroundThreadEntryPoint, this);
     background_thread.detach();
   }
 
   // If the queue is empty, the background thread may be waiting for work.
   if (background_work_queue_.empty()) {
+    // 唤醒一次线程，此时还在持锁范围内
     background_work_cv_.Signal();
   }
 
+  // emplace用于直接在容器内部构造元素，相比于 push 函数，它能更高效地避免一次拷贝或移动操作
+  // std::queue::emplace 是在需要高效地向队列添加元素，且希望避免不必要的对象复制或移动时的首选方法
   background_work_queue_.emplace(background_work_function, background_work_arg);
   background_work_mutex_.Unlock();
 }
 
+// 线程处理函数
 void PosixEnv::BackgroundThreadMain() {
   while (true) {
     background_work_mutex_.Lock();

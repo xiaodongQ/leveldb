@@ -1405,9 +1405,11 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       log_ = new log::Writer(lfile);
       imm_ = mem_;
       has_imm_.store(true, std::memory_order_release);
+      // 原来的memtable移动到immutable memtable
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
+      // 检查是否需要压缩
       MaybeScheduleCompaction();
     }
   }
