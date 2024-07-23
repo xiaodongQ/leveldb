@@ -553,8 +553,10 @@ void DBImpl::CompactMemTable() {
 
   // Save the contents of the memtable as a new Table
   VersionEdit edit;
+  // 当前version（每次压缩完都会创建一个新的version）
   Version* base = versions_->current();
   base->Ref();
+  // immutable memtable 写入到 level0
   Status s = WriteLevel0Table(imm_, &edit, base);
   base->Unref();
 
@@ -673,6 +675,8 @@ void DBImpl::MaybeScheduleCompaction() {
     // No work to be done
   } else {
     background_compaction_scheduled_ = true;
+    // 这里面会生产一个任务，并通知消费者进行线程处理
+    // 具体任务处理在 DBImpl::BGWork 回调函数里，负责后台压缩 immutable memtable
     env_->Schedule(&DBImpl::BGWork, this);
   }
 }
@@ -681,6 +685,7 @@ void DBImpl::BGWork(void* db) {
   reinterpret_cast<DBImpl*>(db)->BackgroundCall();
 }
 
+// 负责后台压缩 immutable memtable
 void DBImpl::BackgroundCall() {
   MutexLock l(&mutex_);
   assert(background_compaction_scheduled_);
@@ -689,6 +694,7 @@ void DBImpl::BackgroundCall() {
   } else if (!bg_error_.ok()) {
     // No more background work after a background error.
   } else {
+    // 检查并进行后台压缩
     BackgroundCompaction();
   }
 
@@ -696,6 +702,7 @@ void DBImpl::BackgroundCall() {
 
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
+  // 再检查一次是否要压缩
   MaybeScheduleCompaction();
   background_work_finished_signal_.SignalAll();
 }
@@ -703,6 +710,7 @@ void DBImpl::BackgroundCall() {
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
 
+  // 存在immutable memtable则压缩并退出
   if (imm_ != nullptr) {
     CompactMemTable();
     return;
@@ -1220,6 +1228,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   }
 
   // May temporarily unlock and wait.
+  // 申请写入的空间，里面会检查是否需要转换memtable、是否需要压缩
   // 声明为：Status DBImpl::MakeRoomForWrite(bool force)，若传入 WriteBatch* 为NULL则强制写，即不允许延迟写
   // 调用 MakeRoomForWrite 前必定已持锁，里面会断言判断
   Status status = MakeRoomForWrite(updates == nullptr);

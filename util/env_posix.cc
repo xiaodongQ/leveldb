@@ -833,6 +833,7 @@ void PosixEnv::Schedule(
     background_work_cv_.Signal();
   }
 
+  // 插入一个任务
   // emplace用于直接在容器内部构造元素，相比于 push 函数，它能更高效地避免一次拷贝或移动操作
   // std::queue::emplace 是在需要高效地向队列添加元素，且希望避免不必要的对象复制或移动时的首选方法
   background_work_queue_.emplace(background_work_function, background_work_arg);
@@ -845,6 +846,7 @@ void PosixEnv::BackgroundThreadMain() {
     background_work_mutex_.Lock();
 
     // Wait until there is work to be done.
+    // 等待生产者给信号
     while (background_work_queue_.empty()) {
       background_work_cv_.Wait();
     }
@@ -855,6 +857,7 @@ void PosixEnv::BackgroundThreadMain() {
     background_work_queue_.pop();
 
     background_work_mutex_.Unlock();
+    // 开始执行
     background_work_function(background_work_arg);
   }
 }
