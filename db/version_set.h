@@ -307,6 +307,7 @@ class VersionSet {
   // Opened lazily
   WritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
+  // 循环双端队列的头
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
 

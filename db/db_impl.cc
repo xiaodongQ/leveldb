@@ -1232,8 +1232,10 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   // 声明为：Status DBImpl::MakeRoomForWrite(bool force)，若传入 WriteBatch* 为NULL则强制写，即不允许延迟写
   // 调用 MakeRoomForWrite 前必定已持锁，里面会断言判断
   Status status = MakeRoomForWrite(updates == nullptr);
+  // VersionSet的最新序列号
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
+  // 申请空间成功且有内容要写入时
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
@@ -1245,6 +1247,8 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // into mem_.
     {
       mutex_.Unlock();
+      // 写WAL预写日志
+      // Contents获取WriteBatch里面的内容，多条记录按batch格式组织
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
       if (status.ok() && options.sync) {

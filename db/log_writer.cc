@@ -41,6 +41,7 @@ Status Writer::AddRecord(const Slice& slice) {
   Status s;
   bool begin = true;
   do {
+    // kBlockSize默认为32KB
     const int leftover = kBlockSize - block_offset_;
     assert(leftover >= 0);
     if (leftover < kHeaderSize) {
@@ -71,6 +72,7 @@ Status Writer::AddRecord(const Slice& slice) {
       type = kMiddleType;
     }
 
+    // 写物理盘，这里只是调::write，具体操作系统的page cache等不关注
     s = EmitPhysicalRecord(type, ptr, fragment_length);
     ptr += fragment_length;
     left -= fragment_length;
@@ -91,15 +93,18 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr,
   buf[6] = static_cast<char>(t);
 
   // Compute the crc of the record type and the payload.
+  // 计算ptr数据的 CRC
   uint32_t crc = crc32c::Extend(type_crc_[t], ptr, length);
   crc = crc32c::Mask(crc);  // Adjust for storage
   EncodeFixed32(buf, crc);
 
   // Write the header and the payload
+  // 写数据到 dest_
   Status s = dest_->Append(Slice(buf, kHeaderSize));
   if (s.ok()) {
     s = dest_->Append(Slice(ptr, length));
     if (s.ok()) {
+      // 系统write接口写磁盘
       s = dest_->Flush();
     }
   }
