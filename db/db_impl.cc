@@ -1213,10 +1213,13 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   w.sync = options.sync;
   w.done = false;
 
+  // 整体加锁，在同一个时刻，只允许一个写入操作将内容写入到日志文件以及内存数据库中
   // RAII特性，构造时lock，析构时unlock
   MutexLock l(&mutex_);
-  // 这里的writers_是 std::deque 双端队列
+  // 要写入的数据，由Writer封装后先放到队列尾部
+  // 这里的writers_是 std::deque 双端队列，存放Writer*
   writers_.push_back(&w);
+  // 有其他的写入操作，则等待
   while (!w.done && &w != writers_.front()) {
     // 线程安全地等待条件变量，直到被唤醒
     w.cv.Wait();
@@ -1229,14 +1232,17 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
   // May temporarily unlock and wait.
   // 申请写入的空间，里面会检查是否需要转换memtable、是否需要压缩
-  // 声明为：Status DBImpl::MakeRoomForWrite(bool force)，若传入 WriteBatch* 为NULL则强制写，即不允许延迟写
+  // 声明为：Status DBImpl::MakeRoomForWrite(bool force)，updates为nullptr时压缩处理
   // 调用 MakeRoomForWrite 前必定已持锁，里面会断言判断
   Status status = MakeRoomForWrite(updates == nullptr);
   // VersionSet的最新序列号
   uint64_t last_sequence = versions_->LastSequence();
+  // 待写入数据（封装在Writer中）
   Writer* last_writer = &w;
-  // 申请空间成功且有内容要写入时
+  // 有合并空间且有内容要写入时
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
+    // 合并写操作，要合并的对象是 writers_ 对应的 Writer 双端队列
+    // 都会合并到 tmp_batch_ 成员变量去，返回的指针实际也是 tmp_batch_（定义为WriteBatch* tmp_batch_）
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
@@ -1247,7 +1253,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // into mem_.
     {
       mutex_.Unlock();
-      // 写WAL预写日志
+      // 合并后的记录，写WAL预写日志
       // Contents获取WriteBatch里面的内容，多条记录按batch格式组织
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
@@ -1258,6 +1264,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         }
       }
       if (status.ok()) {
+        // 写memtable，write_batch写到传入的 mem_ 里
         status = WriteBatchInternal::InsertInto(write_batch, mem_);
       }
       mutex_.Lock();
@@ -1274,7 +1281,9 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   }
 
   while (true) {
+    // deque头
     Writer* ready = writers_.front();
+    // 从deque弹出
     writers_.pop_front();
     if (ready != &w) {
       ready->status = status;
@@ -1294,51 +1303,68 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
 // REQUIRES: Writer list must be non-empty
 // REQUIRES: First writer must have a non-null batch
+// 用于合并写操作
 WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   mutex_.AssertHeld();
   assert(!writers_.empty());
+  // 从deque里获取队列头
   Writer* first = writers_.front();
+  // 第一个Writer里对应的整体原子操作
   WriteBatch* result = first->batch;
   assert(result != nullptr);
 
+  // 第一条原子写要写的长度
   size_t size = WriteBatchInternal::ByteSize(first->batch);
 
   // Allow the group to grow up to a maximum size, but if the
   // original write is small, limit the growth so we do not slow
   // down the small write too much.
+  // 此处即 1MB，写入以字节单位。合并写入下面会限制合并的总大小
   size_t max_size = 1 << 20;
+  // 128KB
   if (size <= (128 << 10)) {
     max_size = size + (128 << 10);
   }
 
+  // 最近的一次写入
   *last_writer = first;
+  // deque迭代器，这里是队列头
   std::deque<Writer*>::iterator iter = writers_.begin();
   ++iter;  // Advance past "first"
   for (; iter != writers_.end(); ++iter) {
     Writer* w = *iter;
+    // 合并的这批写操作都是相同的sync标志，不允许非sync里合并一条sync写
     if (w->sync && !first->sync) {
       // Do not include a sync write into a batch handled by a non-sync write.
       break;
     }
 
     if (w->batch != nullptr) {
+      // 叠加本次原子写要写的长度
       size += WriteBatchInternal::ByteSize(w->batch);
+      // 合并写的总大小此处进行限制，从上面可知若第1条<=128KB则128KB+第1条长度；若>128KB则最大合并大小为1MB
       if (size > max_size) {
         // Do not make batch too big
         break;
       }
 
+      // 若为deque队列里第一个Writer对应的 WriteBatch，则把result切换成 tmp_batch_用于后续合并，此处表示只切换一次即可
       // Append to *result
       if (result == first->batch) {
         // Switch to temporary batch instead of disturbing caller's batch
+        // 切换成将 tmp_batch_ 写入
         result = tmp_batch_;
         assert(WriteBatchInternal::Count(result) == 0);
+        // 把first->batch合并到result里
         WriteBatchInternal::Append(result, first->batch);
       }
+      // 实际都合并到了 tmp_batch_，上面result已经切换成tmp_batch_了
       WriteBatchInternal::Append(result, w->batch);
     }
+    // 记录下最后合并的那条Writer记录
     *last_writer = w;
   }
+  // 返回合并后的WriteBatch记录
   return result;
 }
 
