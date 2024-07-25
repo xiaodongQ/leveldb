@@ -1124,12 +1124,15 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
   Status s;
+  // RAII 加锁
   MutexLock l(&mutex_);
   SequenceNumber snapshot;
   if (options.snapshot != nullptr) {
+    // 若option里传入了快照，获取快照对应的 seqnumber
     snapshot =
         static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
   } else {
+    // 非快照Get，则获取当前 VersionSet 对应的seqnumber
     snapshot = versions_->LastSequence();
   }
 
@@ -1285,14 +1288,17 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     Writer* ready = writers_.front();
     // 从deque弹出
     writers_.pop_front();
+    // 如果队列头有其他待写入，依次通知写入（本次写入合并到了其后面）
     if (ready != &w) {
       ready->status = status;
       ready->done = true;
+      // 通知唤醒一个线程
       ready->cv.Signal();
     }
     if (ready == last_writer) break;
   }
 
+  // 最后是通知本次的写入。和上面逻辑差别是 status和done 的赋值
   // Notify new head of write queue
   if (!writers_.empty()) {
     writers_.front()->cv.Signal();
