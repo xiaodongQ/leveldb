@@ -151,6 +151,7 @@ class Version {
   int refs_;          // Number of live refs to this version
 
   // List of files per level
+  // 每层的元数据信息集合，最大7层，每个数组成员都是个vector
   std::vector<FileMetaData*> files_[config::kNumLevels];
 
   // Next file to compact based on seek stats.
@@ -297,6 +298,7 @@ class VersionSet {
   const std::string dbname_;
   const Options* const options_;
   TableCache* const table_cache_;
+  // InternalKey比较器，用于整个VersionSet中的数据成员key比较
   const InternalKeyComparator icmp_;
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;

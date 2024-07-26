@@ -15,13 +15,17 @@ namespace leveldb {
 
 class VersionSet;
 
+// 每个level包含一个该结构的数组：std::vector<FileMetaData*>，可能包含多个不连续区间，类似： [1-4] [5-10]
 struct FileMetaData {
   FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
 
   int refs;
   int allowed_seeks;  // Seeks allowed until compaction
+  // 文件数量
   uint64_t number;
+  // 当前区间对应的文件个数
   uint64_t file_size;    // File size in bytes
+  // 记录了区间最小、最大的InternalKey
   InternalKey smallest;  // Smallest internal key served by table
   InternalKey largest;   // Largest internal key served by table
 };

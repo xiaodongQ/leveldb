@@ -278,34 +278,43 @@ static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
 }
 
+// 没有返回值，查询结果会更新在 arg 中，func负责区间的具体匹配比较
 void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
                                  bool (*func)(void*, int, FileMetaData*)) {
   const Comparator* ucmp = vset_->icmp_.user_comparator();
 
+  // 找level0层，从新记录->旧记录开始找
   // Search level-0 in order from newest to oldest.
   std::vector<FileMetaData*> tmp;
+  // 精简空间，vector大小调整为：level0层对应std::vector<FileMetaData*>的size()
   tmp.reserve(files_[0].size());
   for (uint32_t i = 0; i < files_[0].size(); i++) {
     FileMetaData* f = files_[0][i];
+    // 要查找的user_key在本区间内
     if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
         ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
+      // level0层因为顺序可能有交叉，所以要全部区间都遍历，找到所有覆盖了user_key的区间
       tmp.push_back(f);
     }
   }
   if (!tmp.empty()) {
+    // 用传入的func处理所有覆盖user_key的FileMetaData区间
     std::sort(tmp.begin(), tmp.end(), NewestFirst);
     for (uint32_t i = 0; i < tmp.size(); i++) {
+      // func里面会操作修改arg
       if (!(*func)(arg, 0, tmp[i])) {
         return;
       }
     }
   }
 
+  // level0里没有找到 user_key，则继续找下面的level
   // Search other levels.
   for (int level = 1; level < config::kNumLevels; level++) {
     size_t num_files = files_[level].size();
     if (num_files == 0) continue;
 
+    // 二分查找，O(logN)
     // Binary search to find earliest index whose largest key >= internal_key.
     uint32_t index = FindFile(vset_->icmp_, files_[level], internal_key);
     if (index < num_files) {
@@ -313,6 +322,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
       if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
         // All of "f" is past any data for user_key
       } else {
+        // func里面会操作修改arg
         if (!(*func)(arg, level, f)) {
           return;
         }
@@ -326,6 +336,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   stats->seek_file = nullptr;
   stats->seek_file_level = -1;
 
+  // 定义一个内部类（为什么要定义在函数体里面？）
   struct State {
     Saver saver;
     GetStats* stats;
@@ -351,6 +362,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       state->last_file_read = f;
       state->last_file_read_level = level;
 
+      // 从VersionSet中的缓存里查找
       state->s = state->vset->table_cache_->Get(*state->options, f->number,
                                                 f->file_size, state->ikey,
                                                 &state->saver, SaveValue);
@@ -394,6 +406,8 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   state.saver.user_key = k.user_key();
   state.saver.value = value;
 
+  // 根据key查找VersionSet，查询结果放在 state 的成员变量里，没有单独的返回值
+  // 最后的参数是函数指针：State::Match，用于查找比较 InternalKey
   ForEachOverlapping(state.saver.user_key, state.ikey, &state, &State::Match);
 
   return state.found ? state.s : Status::NotFound(Slice());

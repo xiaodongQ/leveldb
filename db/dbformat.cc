@@ -116,18 +116,23 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
 
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
+  // 保守估计存这个key要的空间
   size_t needed = usize + 13;  // A conservative estimate
   char* dst;
   if (needed <= sizeof(space_)) {
+    // <=200字节则直接用 space_ 成员，针对短key
     dst = space_;
   } else {
+    // >200字节的key，则申请堆空间
     dst = new char[needed];
   }
   start_ = dst;
   dst = EncodeVarint32(dst, usize + 8);
   kstart_ = dst;
+  // 存key
   std::memcpy(dst, user_key.data(), usize);
   dst += usize;
+  // key编码，里面会加上seqnumber和类型
   EncodeFixed64(dst, PackSequenceAndType(s, kValueTypeForSeek));
   dst += 8;
   end_ = dst;

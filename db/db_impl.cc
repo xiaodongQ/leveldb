@@ -1136,9 +1136,16 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     snapshot = versions_->LastSequence();
   }
 
+  // 当前数据库的 memtable
   MemTable* mem = mem_;
+  // immutable memtable
   MemTable* imm = imm_;
+  // VersionSet里当前使用的Version
+  /*
+    immutalbe memtable持久化后得到 level0的sstable，
+  */
   Version* current = versions_->current();
+  // memtable、immutable memtable、Version里的引用计数都+1（下面结束时会都-1）
   mem->Ref();
   if (imm != nullptr) imm->Ref();
   current->Ref();
@@ -1148,15 +1155,20 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
 
   // Unlock while reading from files and memtables
   {
+    // 从文件和memtable中读取时先解锁
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
+    //构造一个查询key，会根据key+seqnumber+key类型 进行编码得到
     LookupKey lkey(key, snapshot);
+    // 到memtable找key，传入key对应的seqnumber
     if (mem->Get(lkey, value, &s)) {
       // Done
-    } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
+    } else if (imm != nullptr && imm->Get(lkey, value, &s)) {  // 找不到则在immutalbe table里找
       // Done
     } else {
+      // 上面都找不到则在Version里找
       s = current->Get(options, lkey, value, &stats);
+      // 状态直接更新为true？
       have_stat_update = true;
     }
     mutex_.Lock();
@@ -1165,6 +1177,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   if (have_stat_update && current->UpdateStats(stats)) {
     MaybeScheduleCompaction();
   }
+  // memtable、immutable memtable、Version里的引用计数都-1
   mem->Unref();
   if (imm != nullptr) imm->Unref();
   current->Unref();

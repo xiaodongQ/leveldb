@@ -196,6 +196,7 @@ class LookupKey {
   Slice memtable_key() const { return Slice(start_, end_ - start_); }
 
   // Return an internal key (suitable for passing to an internal iterator)
+  // LookupKey构造时会计算好internalKey，此处获取
   Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }
 
   // Return the user key
@@ -210,6 +211,7 @@ class LookupKey {
   // The array is a suitable MemTable key.
   // The suffix starting with "userkey" can be used as an InternalKey.
   const char* start_;
+  // key编码后的起始地址
   const char* kstart_;
   const char* end_;
   char space_[200];  // Avoid allocation for short keys
