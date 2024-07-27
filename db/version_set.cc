@@ -362,7 +362,8 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       state->last_file_read = f;
       state->last_file_read_level = level;
 
-      // 从VersionSet中的缓存里查找
+      // 从VersionSet中的缓存里查找，查找结果放在 saver 中
+      //  &state->saver传给：void* arg
       state->s = state->vset->table_cache_->Get(*state->options, f->number,
                                                 f->file_size, state->ikey,
                                                 &state->saver, SaveValue);
