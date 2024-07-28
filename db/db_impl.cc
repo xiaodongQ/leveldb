@@ -1142,10 +1142,12 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   MemTable* imm = imm_;
   // VersionSet里当前使用的Version
   /*
-    immutalbe memtable持久化后得到 level0的sstable，
+    immutalbe memtable压缩持久化后得到 level0的sstable；
+    levelN层的sstable压缩后得到levelN+1层的sstable
+    每次压缩完成，就得到一个Version。Version创建规则：versionNew = versionOld + VersionEdit（VersionEdit记录相对上一个Version变化的内容）
   */
   Version* current = versions_->current();
-  // memtable、immutable memtable、Version里的引用计数都+1（下面结束时会都-1）
+  // memtable、immutable memtable、current Version里的引用计数都+1（下面结束时会都-1）
   mem->Ref();
   if (imm != nullptr) imm->Ref();
   current->Ref();
@@ -1166,7 +1168,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {  // 找不到则在immutalbe table里找
       // Done
     } else {
-      // 上面都找不到则在Version里找
+      // 上面都找不到则在current Version里找
       s = current->Get(options, lkey, value, &stats);
       // 状态直接更新为true？
       have_stat_update = true;
@@ -1174,6 +1176,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Lock();
   }
 
+  // 若上面查到current Version，且计数满足压缩条件，则检查调度进行压缩
   if (have_stat_update && current->UpdateStats(stats)) {
     MaybeScheduleCompaction();
   }

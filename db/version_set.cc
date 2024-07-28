@@ -419,6 +419,7 @@ bool Version::UpdateStats(const GetStats& stats) {
   if (f != nullptr) {
     f->allowed_seeks--;
     if (f->allowed_seeks <= 0 && file_to_compact_ == nullptr) {
+      // 下一个要压缩的文件
       file_to_compact_ = f;
       file_to_compact_level_ = stats.seek_file_level;
       return true;
