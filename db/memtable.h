@@ -72,6 +72,7 @@ class MemTable {
     int operator()(const char* a, const char* b) const;
   };
 
+  // 跳表
   typedef SkipList<const char*, KeyComparator> Table;
 
   ~MemTable();  // Private since only Unref() should be used to delete it
@@ -79,6 +80,7 @@ class MemTable {
   KeyComparator comparator_;
   int refs_;
   Arena arena_;
+  // Table是跳表结构
   Table table_;
 };
 

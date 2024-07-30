@@ -180,8 +180,10 @@ class DBImpl : public DB {
   // 内存态的表，不可修改
   MemTable* imm_ GUARDED_BY(mutex_);  // Memtable being compacted
   std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_
+  // 此处表示日志文件，具体内容在实现类中（linux下为PosixWritableFile）
   WritableFile* logfile_;
   uint64_t logfile_number_ GUARDED_BY(mutex_);
+  // 日志文件对于的写操作对象，该对象操作都体现在 logfile_ 对应文件上
   log::Writer* log_;
   uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
@@ -192,7 +194,7 @@ class DBImpl : public DB {
       动态大小：能够根据需要自动调整大小，不需要手动管理内存。
       不连续存储：内部实现通常不是一个连续的内存块，而是多个小块的集合，以优化双端操作。
   */
-  // `Writer*`的双端队列
+  // `Writer*`的双端队列，待写入db的数据
   // Queue of writers.
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);

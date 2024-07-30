@@ -40,6 +40,7 @@ Status Writer::AddRecord(const Slice& slice) {
   // zero-length record
   Status s;
   bool begin = true;
+  // 循环写 dest_（定义为`WritableFile* dest_;`），并::write写物理盘
   do {
     // kBlockSize默认为32KB
     const int leftover = kBlockSize - block_offset_;
@@ -49,6 +50,7 @@ Status Writer::AddRecord(const Slice& slice) {
       if (leftover > 0) {
         // Fill the trailer (literal below relies on kHeaderSize being 7)
         static_assert(kHeaderSize == 7, "");
+        // 小数据写buffer，大数据直接::write写盘
         dest_->Append(Slice("\x00\x00\x00\x00\x00\x00", leftover));
       }
       block_offset_ = 0;
@@ -72,7 +74,7 @@ Status Writer::AddRecord(const Slice& slice) {
       type = kMiddleType;
     }
 
-    // 写物理盘，这里只是调::write，具体操作系统的page cache等不关注
+    // buffer写物理盘，这里只是调::write，具体操作系统的page cache等不关注
     s = EmitPhysicalRecord(type, ptr, fragment_length);
     ptr += fragment_length;
     left -= fragment_length;
@@ -104,7 +106,7 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr,
   if (s.ok()) {
     s = dest_->Append(Slice(ptr, length));
     if (s.ok()) {
-      // 系统write接口写磁盘
+      // 系统::write接口写磁盘，注意并不会调::flush
       s = dest_->Flush();
     }
   }

@@ -310,6 +310,7 @@ class PosixWritableFile final : public WritableFile {
       return status;
     }
 
+    // 小数据写buffer，大数据直接写盘
     // Small writes go to buffer, large writes are written directly.
     if (write_size < kWritableFileBufferSize) {
       std::memcpy(buf_, write_data, write_size);

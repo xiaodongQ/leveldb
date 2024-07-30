@@ -303,6 +303,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return s;
   }
 
+  // 不存在 dbname/CURRENT 则创建
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       Log(options_.info_log, "Creating DB %s since it was missing.",
@@ -338,6 +339,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   const uint64_t min_log = versions_->LogNumber();
   const uint64_t prev_log = versions_->PrevLogNumber();
   std::vector<std::string> filenames;
+  // 获取目录下的文件列表
   s = env_->GetChildren(dbname_, &filenames);
   if (!s.ok()) {
     return s;
@@ -348,8 +350,16 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   FileType type;
   std::vector<uint64_t> logs;
   for (size_t i = 0; i < filenames.size(); i++) {
+    // 解析文件名称，有下面这几类文件
+    //    dbname/CURRENT
+    //    dbname/LOCK
+    //    dbname/LOG
+    //    dbname/LOG.old
+    //    dbname/MANIFEST-[0-9]+
+    //    dbname/[0-9]+.(log|sst|ldb)
     if (ParseFileName(filenames[i], &number, &type)) {
       expected.erase(number);
+      // .log 后缀文件才是 kLogFile 类型
       if (type == kLogFile && ((number >= min_log) || (number == prev_log)))
         logs.push_back(number);
     }
@@ -361,6 +371,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return Status::Corruption(buf, TableFileName(dbname_, *(expected.begin())));
   }
 
+  // 上面获取的 .log 排序
   // Recover in the order in which the logs were generated
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
@@ -1270,10 +1281,11 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // during this phase since &w is currently responsible for logging
     // and protects against concurrent loggers and concurrent writes
     // into mem_.
+    // 这里解锁是因为 w（类型为Writer） 中会进行并发控制。且下面操作可能涉及::write文件io，比较耗时
     {
       mutex_.Unlock();
       // 合并后的记录，写WAL预写日志
-      // Contents获取WriteBatch里面的内容，多条记录按batch格式组织
+      // Contents 用于获取WriteBatch里面的内容，多条记录按batch格式组织
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
       if (status.ok() && options.sync) {
@@ -1414,7 +1426,9 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
+      // 等待过程不要持锁
       env_->SleepForMicroseconds(1000);
+      // 由于当前在while(true)循环体中，下次就不会进入该语句块了
       allow_delay = false;  // Do not delay a single write more than once
       mutex_.Lock();
     } else if (!force &&
@@ -1464,6 +1478,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       logfile_ = lfile;
       logfile_number_ = new_log_number;
       log_ = new log::Writer(lfile);
+      // 这里进行 imm_ 初始化
       imm_ = mem_;
       has_imm_.store(true, std::memory_order_release);
       // 原来的memtable移动到immutable memtable
@@ -1577,6 +1592,7 @@ DB::~DB() = default;
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
+  // Open的时候会初始化DBImpl相关内容
   DBImpl* impl = new DBImpl(options, dbname);
   impl->mutex_.Lock();
   VersionEdit edit;
@@ -1591,9 +1607,12 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
                                      &lfile);
     if (s.ok()) {
       edit.SetLogNumber(new_log_number);
+      // 初始化日志文件
       impl->logfile_ = lfile;
       impl->logfile_number_ = new_log_number;
+      // 初始化日志文件对于的写操作对象，该对象操作都体现在 logfile_ 对应文件上
       impl->log_ = new log::Writer(lfile);
+      // mem_ 为空则new进行实例化
       impl->mem_ = new MemTable(impl->internal_comparator_);
       impl->mem_->Ref();
     }
