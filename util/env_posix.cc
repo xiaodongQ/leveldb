@@ -295,22 +295,25 @@ class PosixWritableFile final : public WritableFile {
     const char* write_data = data.data();
 
     // Fit as much as possible into buffer.
+    // 若要写的数据 > buffer还剩下的空间，先写满剩下的空间
     size_t copy_size = std::min(write_size, kWritableFileBufferSize - pos_);
     std::memcpy(buf_ + pos_, write_data, copy_size);
     write_data += copy_size;
     write_size -= copy_size;
     pos_ += copy_size;
+    // 此处说明buffer剩余空间足够写入本次数据，写入buffer后直接退出
     if (write_size == 0) {
       return Status::OK();
     }
 
+    // 到这里说明只写了一部分数据，buffer已经满了，调一次 ::write 写盘
     // Can't fit in buffer, so need to do at least one write.
     Status status = FlushBuffer();
     if (!status.ok()) {
       return status;
     }
 
-    // 小数据写buffer，大数据直接写盘
+    // 剩余要写入的数据，不足64KB则写buffer后退出，否则直接::write写盘（操作系统的page cache等不关注）
     // Small writes go to buffer, large writes are written directly.
     if (write_size < kWritableFileBufferSize) {
       std::memcpy(buf_, write_data, write_size);
@@ -456,7 +459,9 @@ class PosixWritableFile final : public WritableFile {
   }
 
   // buf_[0, pos_ - 1] contains data to be written to fd_.
+  // kWritableFileBufferSize定义为 65536 的const变量，即此处buffer为64KB
   char buf_[kWritableFileBufferSize];
+  // buf最后数据的偏移
   size_t pos_;
   int fd_;
 

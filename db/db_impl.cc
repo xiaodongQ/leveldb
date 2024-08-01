@@ -1274,6 +1274,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // 合并写操作，要合并的对象是 writers_ 对应的 Writer 双端队列
     // 都会合并到 tmp_batch_ 成员变量去，返回的指针实际也是 tmp_batch_（定义为WriteBatch* tmp_batch_）
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
+    // 向write_batch里设置 sequence num
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
 
@@ -1285,7 +1286,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     {
       mutex_.Unlock();
       // 合并后的记录，写WAL预写日志
-      // Contents 用于获取WriteBatch里面的内容，多条记录按batch格式组织
+      // Contents 用于获取WriteBatch里面的内容（batch->rep_对应的Slice），多条记录按batch格式组织
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
       if (status.ok() && options.sync) {
