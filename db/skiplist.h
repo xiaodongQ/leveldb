@@ -57,6 +57,7 @@ class SkipList {
   // Returns true iff an entry that compares equal to key is in the list.
   bool Contains(const Key& key) const;
 
+  // 定义迭代器内部类
   // Iteration over the contents of a skip list
   class Iterator {
    public:
@@ -127,12 +128,15 @@ class SkipList {
 
   // Immutable after construction
   Comparator const compare_;
+  // 用于申请节点
   Arena* const arena_;  // Arena used for allocations of nodes
 
+  // 跳表头
   Node* const head_;
 
   // Modified only by Insert().  Read racily by readers, but stale
   // values are ok.
+  // 跳表的高度
   std::atomic<int> max_height_;  // Height of the entire list
 
   // Read/written only by Insert().
@@ -148,10 +152,15 @@ struct SkipList<Key, Comparator>::Node {
 
   // Accessors/mutators for links.  Wrapped in methods so we can
   // add the appropriate barriers as necessary.
+  // 传入的n是层数，对于高层有的索引节点，下面几层肯定也有这个节点
   Node* Next(int n) {
     assert(n >= 0);
     // Use an 'acquire load' so that we observe a fully initialized
     // version of the returned Node.
+    // 示意图如下：next_在这n层(0~n-1)都是同一个指针
+    // *           *            *
+    // *     *     *      *     *
+    // *  *  *  *  *   *  *  *  *
     return next_[n].load(std::memory_order_acquire);
   }
   void SetNext(int n, Node* x) {
@@ -252,6 +261,7 @@ int SkipList<Key, Comparator>::RandomHeight() {
 template <typename Key, class Comparator>
 bool SkipList<Key, Comparator>::KeyIsAfterNode(const Key& key, Node* n) const {
   // null n is considered infinite
+  // key > 某节点（即key在节点后面）则返回true
   return (n != nullptr) && (compare_(n->key, key) < 0);
 }
 
@@ -260,18 +270,25 @@ typename SkipList<Key, Comparator>::Node*
 SkipList<Key, Comparator>::FindGreaterOrEqual(const Key& key,
                                               Node** prev) const {
   Node* x = head_;
+  // 当前高度
   int level = GetMaxHeight() - 1;
   while (true) {
+    // 依次从最高层索引往下查找，直到 key <= 某节点
+    // Node* 的Next可以获取本层的下一个节点，也可以获取下一层的下一个节点
     Node* next = x->Next(level);
+    // 只要key在节点后面(>)就继续next
     if (KeyIsAfterNode(key, next)) {
       // Keep searching in this list
       x = next;
     } else {
+      // prev里依次记录索引指针
       if (prev != nullptr) prev[level] = x;
       if (level == 0) {
+        // 查找到最底层链表了
         return next;
       } else {
         // Switch to next list
+        // 继续下一层查找
         level--;
       }
     }
