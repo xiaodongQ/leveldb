@@ -395,11 +395,14 @@ void SkipList<Key, Comparator>::Insert(const Key& key) {
 
   // 构造要插入的节点
   x = NewNode(key, height);
+  // 链表的插入操作，只是各层前驱节点也需设置
   for (int i = 0; i < height; i++) {
     // NoBarrier_SetNext() suffices since we will add a barrier when
     // we publish a pointer to "x" in prev[i].
-    // 每层都进行插入操作，设置其对应层级的next指针
+    // 要插入的节点，其前驱节点列表设置为和上述查找到的节点一样，即通过同样的前驱索引路径可找到该节点
+    // 为了保证并发读的正确性，先设置要插入的节点指针，再设置原跳表中节点（prev）指针
     x->NoBarrier_SetNext(i, prev[i]->NoBarrier_Next(i));
+    // 每层前驱都进行插入节点操作
     prev[i]->SetNext(i, x);
   }
 }
