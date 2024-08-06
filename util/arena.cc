@@ -18,6 +18,7 @@ Arena::~Arena() {
 }
 
 char* Arena::AllocateFallback(size_t bytes) {
+  // 需申请空间 > 1/4 block大小（1KB），则申请实际需要的空间
   if (bytes > kBlockSize / 4) {
     // Object is more than a quarter of our block size.  Allocate it separately
     // to avoid wasting too much space in leftover bytes.
@@ -26,6 +27,8 @@ char* Arena::AllocateFallback(size_t bytes) {
   }
 
   // We waste the remaining space in the current block.
+  // 需申请空间 <= 1/4 block大小（1KB），则申请一个完整block，存放本次要的空间后，其余可供复用
+  // 此处数据block大小为4KB（注意，日志block大小为32KB）
   alloc_ptr_ = AllocateNewBlock(kBlockSize);
   alloc_bytes_remaining_ = kBlockSize;
 
@@ -36,18 +39,22 @@ char* Arena::AllocateFallback(size_t bytes) {
 }
 
 char* Arena::AllocateAligned(size_t bytes) {
+  // 按指针长度对齐（64位一般8字节）
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
+  // 申请的内存空间，必须按 2^n 大小对齐
   static_assert((align & (align - 1)) == 0,
                 "Pointer size should be a power of 2");
   size_t current_mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (align - 1);
   size_t slop = (current_mod == 0 ? 0 : align - current_mod);
   size_t needed = bytes + slop;
   char* result;
+  // 剩余空间够用则不用新增
   if (needed <= alloc_bytes_remaining_) {
     result = alloc_ptr_ + slop;
     alloc_ptr_ += needed;
     alloc_bytes_remaining_ -= needed;
   } else {
+    // 需要的空间比剩余空间大，则按实际大小申请空间
     // AllocateFallback always returned aligned memory
     result = AllocateFallback(bytes);
   }

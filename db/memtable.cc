@@ -45,6 +45,9 @@ static const char* EncodeKey(std::string* scratch, const Slice& target) {
 
 class MemTableIterator : public Iterator {
  public:
+  // 初始化列表中，MemTable::Table::Iterator 初始化为 MemTable::Table* table？
+  // SkipList的内部类`SkipList::Iterator`对应的构造函数就是传一个SkipList*： explicit Iterator(const SkipList* list);
+    // MemTable::Table 实际是SkipList模板类的具体类： typedef SkipList<const char*, KeyComparator> Table;
   explicit MemTableIterator(MemTable::Table* table) : iter_(table) {}
 
   MemTableIterator(const MemTableIterator&) = delete;

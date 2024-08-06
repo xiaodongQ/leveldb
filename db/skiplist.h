@@ -157,7 +157,7 @@ struct SkipList<Key, Comparator>::Node {
     assert(n >= 0);
     // Use an 'acquire load' so that we observe a fully initialized
     // version of the returned Node.
-    // 示意图如下：next_在这n层(0~n-1)都是同一个指针
+    // 示意图如下：next_在这n层(0~n-1)都表示同一个节点（不准确，每层的next是不一样的）
     // *           *            *
     // *     *     *      *     *
     // *  *  *  *  *   *  *  *  *
@@ -171,6 +171,7 @@ struct SkipList<Key, Comparator>::Node {
   }
 
   // No-barrier variants that can be safely used in a few locations.
+  // 不带内存屏障版本的访问器
   Node* NoBarrier_Next(int n) {
     assert(n >= 0);
     return next_[n].load(std::memory_order_relaxed);
@@ -188,8 +189,17 @@ struct SkipList<Key, Comparator>::Node {
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node* SkipList<Key, Comparator>::NewNode(
     const Key& key, int height) {
+  // 申请节点空间，预留了空间给对应的各层指针（最多不会超过height-1层索引）
+  // 这里申请的空间是内存对齐的，便于atomic原子操作
   char* const node_memory = arena_->AllocateAligned(
       sizeof(Node) + sizeof(std::atomic<Node*>) * (height - 1));
+  /*
+    Placement New语法，用法：`new (pointer_to_location) Type(args...);`
+    不会另外申请内存
+    不会自动调用析构函数
+    禁止拷贝和move（对于此处的跳表，并不提供删除节点，只要跳表不被销毁空间就一直在）
+  */
+  // 用于在指定的内存处（node_memory），构造一个Node实例
   return new (node_memory) Node(key);
 }
 
@@ -221,6 +231,7 @@ inline void SkipList<Key, Comparator>::Iterator::Prev() {
   // Instead of using explicit "prev" links, we just search for the
   // last node that falls before key.
   assert(Valid());
+  // 相比在节点中额外增加一个 prev 指针，我们使用从头开始的查找定位其 prev 节点
   node_ = list_->FindLessThan(node_->key);
   if (node_ == list_->head_) {
     node_ = nullptr;
@@ -250,6 +261,7 @@ int SkipList<Key, Comparator>::RandomHeight() {
   // Increase height with probability 1 in kBranching
   static const unsigned int kBranching = 4;
   int height = 1;
+  // 每次以 1/4 的概率增加层数，最后层数 <= 12
   while (height < kMaxHeight && rnd_.OneIn(kBranching)) {
     height++;
   }
@@ -352,14 +364,22 @@ template <typename Key, class Comparator>
 void SkipList<Key, Comparator>::Insert(const Key& key) {
   // TODO(opt): We can use a barrier-free variant of FindGreaterOrEqual()
   // here since Insert() is externally synchronized.
+  // 层数直接取最大值（kMaxHeight = 12）
   Node* prev[kMaxHeight];
+  // 找到 >= key 的第一个节点
+  // * * * key[*  *
   Node* x = FindGreaterOrEqual(key, prev);
 
   // Our data structure does not allow duplicate insertion
+  // 不允许插入重复数据（外部保证）
   assert(x == nullptr || !Equal(key, x->key));
 
+  // 随机获取一个 level 值。每次以 1/4 的概率增加层数，最后返回的层数 <= 12
   int height = RandomHeight();
   if (height > GetMaxHeight()) {
+    // 若生成层数 > 当前实际层数，高层索引指针置为跳表头，从高层查找时会继续往下层找
+    // *
+    // *   *   key[*    *
     for (int i = GetMaxHeight(); i < height; i++) {
       prev[i] = head_;
     }
@@ -373,10 +393,12 @@ void SkipList<Key, Comparator>::Insert(const Key& key) {
     max_height_.store(height, std::memory_order_relaxed);
   }
 
+  // 构造要插入的节点
   x = NewNode(key, height);
   for (int i = 0; i < height; i++) {
     // NoBarrier_SetNext() suffices since we will add a barrier when
     // we publish a pointer to "x" in prev[i].
+    // 每层都进行插入操作，设置其对应层级的next指针
     x->NoBarrier_SetNext(i, prev[i]->NoBarrier_Next(i));
     prev[i]->SetNext(i, x);
   }
