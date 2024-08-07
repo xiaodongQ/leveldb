@@ -21,7 +21,7 @@ struct FileMetaData {
 
   int refs;
   int allowed_seeks;  // Seeks allowed until compaction
-  // 文件数量
+  // 文件数量 or 编号？
   uint64_t number;
   // 当前区间对应的文件个数
   uint64_t file_size;    // File size in bytes

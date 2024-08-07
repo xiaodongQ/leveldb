@@ -518,9 +518,12 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
   const uint64_t start_micros = env_->NowMicros();
+  // 文件元数据（定义在db/version_edit.h中，VersionEdit类中会有多个FileMetaData）
   FileMetaData meta;
+  // version文件计数+1，该数值也用于下面新增文件的文件名： db名称/编号.ldb
   meta.number = versions_->NewFileNumber();
   pending_outputs_.insert(meta.number);
+  // 获取传入 memtable(实际immutable memtable) 的迭代器
   Iterator* iter = mem->NewIterator();
   Log(options_.info_log, "Level-0 table #%llu: started",
       (unsigned long long)meta.number);
@@ -528,6 +531,8 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   Status s;
   {
     mutex_.Unlock();
+    // 这里通过 iter 写 sstable 文件
+    // meta作为指针传入，里面会做一些元数据设置
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
   }
@@ -676,10 +681,13 @@ void DBImpl::RecordBackgroundError(const Status& s) {
 void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
   if (background_compaction_scheduled_) {
+    // 已经触发后台压缩调度，不需要再新增压缩任务
     // Already scheduled
   } else if (shutting_down_.load(std::memory_order_acquire)) {
+    // db删除中，也不压缩
     // DB is being deleted; no more background compactions
   } else if (!bg_error_.ok()) {
+    // 后台压缩出现了错误，也不重新新增任务
     // Already got an error; no more changes
   } else if (imm_ == nullptr && manual_compaction_ == nullptr &&
              !versions_->NeedsCompaction()) {
@@ -1463,6 +1471,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
 
       delete log_;
 
+      // 关闭原来的log文件
       s = logfile_->Close();
       if (!s.ok()) {
         // We may have lost some data written to the previous log file.
@@ -1479,14 +1488,14 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       logfile_ = lfile;
       logfile_number_ = new_log_number;
       log_ = new log::Writer(lfile);
-      // 这里进行 imm_ 初始化
+      // 原来的memtable移动到immutable memtable
       imm_ = mem_;
       has_imm_.store(true, std::memory_order_release);
-      // 原来的memtable移动到immutable memtable
+      // 创建新的memtable
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
-      // 检查是否需要压缩
+      // 检查（immutable memtable和其他level）是否需要压缩
       MaybeScheduleCompaction();
     }
   }
