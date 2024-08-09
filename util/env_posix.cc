@@ -341,26 +341,32 @@ class PosixWritableFile final : public WritableFile {
     // This needs to happen before the manifest file is flushed to disk, to
     // avoid crashing in a state where the manifest refers to files that are not
     // yet on disk.
+    // 如果是 manifest文件，则保证文件在文件系统中已落盘
     Status status = SyncDirIfManifest();
     if (!status.ok()) {
       return status;
     }
 
+    // 再 ::write写文件落盘
     status = FlushBuffer();
     if (!status.ok()) {
       return status;
     }
 
+    // sync落盘
     return SyncFd(fd_, filename_);
   }
 
  private:
+  // ::write写文件
   Status FlushBuffer() {
+    // ::write写文件
     Status status = WriteUnbuffered(buf_, pos_);
     pos_ = 0;
     return status;
   }
 
+  // ::write写文件
   Status WriteUnbuffered(const char* data, size_t size) {
     while (size > 0) {
       ssize_t write_result = ::write(fd_, data, size);
@@ -404,12 +410,14 @@ class PosixWritableFile final : public WritableFile {
     // failures. fcntl(F_FULLFSYNC) is required for that purpose. Some
     // filesystems don't support fcntl(F_FULLFSYNC), and require a fallback to
     // fsync().
+    // MacOS和IOS才有 F_FULLFSYNC，用于落盘
     if (::fcntl(fd, F_FULLFSYNC) == 0) {
       return Status::OK();
     }
 #endif  // HAVE_FULLFSYNC
 
 #if HAVE_FDATASYNC
+    // fdatasync 相较于fsync更快，只写必要的元数据（比如文件大小变化，而如果只有访问时间这种属性变更则可以不落盘）
     bool sync_success = ::fdatasync(fd) == 0;
 #else
     bool sync_success = ::fsync(fd) == 0;

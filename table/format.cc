@@ -34,6 +34,7 @@ void Footer::EncodeTo(std::string* dst) const {
   metaindex_handle_.EncodeTo(dst);
   index_handle_.EncodeTo(dst);
   dst->resize(2 * BlockHandle::kMaxEncodedLength);  // Padding
+  // kTableMagicNumber 内容为："http://code.google.com/p/leveldb/"字符串sha1哈希的前8个字节。
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber & 0xffffffffu));
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber >> 32));
   assert(dst->size() == original_size + kEncodedLength);

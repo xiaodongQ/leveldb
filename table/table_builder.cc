@@ -57,6 +57,7 @@ struct TableBuilder::Rep {
   //
   // Invariant: r->pending_index_entry is true only if data_block is empty.
   bool pending_index_entry;
+  // 数据在文件中的偏移，以及数据长度
   BlockHandle pending_handle;  // Handle to add to index block
 
   std::string compressed_output;
@@ -91,6 +92,7 @@ Status TableBuilder::ChangeOptions(const Options& options) {
   return Status::OK();
 }
 
+// 写key-value数据
 void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
@@ -127,7 +129,9 @@ void TableBuilder::Flush() {
   assert(!r->closed);
   if (!ok()) return;
   if (r->data_block.empty()) return;
+  // pending_index_entry为true时表示 data block 为空，此处说明肯定有data block没落盘
   assert(!r->pending_index_entry);
+  // pending_handle 用来获取偏移
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
@@ -138,6 +142,8 @@ void TableBuilder::Flush() {
   }
 }
 
+// 里面可能需要压缩后再WriteRawBlock
+// handle用于返回在文件的偏移和本次数据长度
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
@@ -150,6 +156,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   Slice block_contents;
   CompressionType type = r->options.compression;
   // TODO(postrelease): Support more compression options: zlib?
+  // 压缩类型
   switch (type) {
     case kNoCompression:
       block_contents = raw;
@@ -184,23 +191,29 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
       break;
     }
   }
+  // 里面写数据，block组装为 data + 压缩类型 + crc校验码
   WriteRawBlock(block_contents, type, handle);
   r->compressed_output.clear();
+  // 写完后清理
   block->Reset();
 }
 
 void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type, BlockHandle* handle) {
   Rep* r = rep_;
+  // 返回在当前sstable文件中的偏移，并设置返回本次数据长度
   handle->set_offset(r->offset);
   handle->set_size(block_contents.size());
+  // 向file写数据
   r->status = r->file->Append(block_contents);
   if (r->status.ok()) {
+    // 用于组装后面的 压缩类型 + crc校验码（4字节）
     char trailer[kBlockTrailerSize];
     trailer[0] = type;
     uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
     EncodeFixed32(trailer + 1, crc32c::Mask(crc));
+    // 组装后的信息写入file
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->status.ok()) {
       r->offset += block_contents.size() + kBlockTrailerSize;
@@ -212,26 +225,36 @@ Status TableBuilder::status() const { return rep_->status; }
 
 Status TableBuilder::Finish() {
   Rep* r = rep_;
+  // 把前面的 data block 写文件落盘
   Flush();
   assert(!r->closed);
   r->closed = true;
 
+  // 各部分数据在sstable文件中的偏移+数据长度
   BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle;
 
   // Write filter block
+  // filter block存储的是data block数据的一些过滤信息。
+  // 这些过滤数据一般指代布隆过滤器的数据，用于加快查询的速度
   if (ok() && r->filter_block != nullptr) {
+    // WriteRawBlock写原始数据（不需要压缩，而WriteBlock里可以对数据进行压缩）
+    // filter_block->Finish() 里面根据布隆过滤器实现
     WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                   &filter_block_handle);
   }
 
   // Write metaindex block
+  // meta index block用来存储filter block在整个sstable中的索引信息。
   if (ok()) {
     BlockBuilder meta_index_block(&r->options);
     if (r->filter_block != nullptr) {
       // Add mapping from "filter.Name" to location of filter data
+      // key为："filter."与过滤器名字组成的常量字符串
       std::string key = "filter.";
       key.append(r->options.filter_policy->Name());
       std::string handle_encoding;
+      // value为：filter block在sstable中的索引信息序列化后的内容，
+      // 索引信息包括：（1）在sstable中的偏移量（2）数据长度。
       filter_block_handle.EncodeTo(&handle_encoding);
       meta_index_block.Add(key, handle_encoding);
     }
@@ -241,10 +264,17 @@ Status TableBuilder::Finish() {
   }
 
   // Write index block
+  // indexblock包含若干条记录，每一条记录代表一个data block的索引信息。
   if (ok()) {
+    // 前面Flush已经把data_block写完了，pending_index_entry也置true了
     if (r->pending_index_entry) {
+      // 一条索引包括以下内容：
+      // 1. data block i 中最大的key值；
+      // 2. 该data block起始地址在sstable中的偏移量；
+      // 3. 该data block的大小
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
+      // 数据在文件中的偏移，以及数据长度
       r->pending_handle.EncodeTo(&handle_encoding);
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;
@@ -255,10 +285,12 @@ Status TableBuilder::Finish() {
   // Write footer
   if (ok()) {
     Footer footer;
+    // footer大小固定，为48字节，用来存储meta index block与index block在sstable中的索引信息，另外尾部还会存储一个magic word
     footer.set_metaindex_handle(metaindex_block_handle);
     footer.set_index_handle(index_block_handle);
     std::string footer_encoding;
     footer.EncodeTo(&footer_encoding);
+    // 追加到文件中
     r->status = r->file->Append(footer_encoding);
     if (r->status.ok()) {
       r->offset += footer_encoding.size();
