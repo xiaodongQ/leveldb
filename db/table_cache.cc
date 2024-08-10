@@ -29,6 +29,8 @@ static void UnrefEntry(void* arg1, void* arg2) {
   cache->Release(h);
 }
 
+// 构造函数，这里cache_初始化为了一个 LRUCache（ShardedLRUCache类）
+// DBImpl()构造函数初始化列表中，传进来的entries默认为990
 TableCache::TableCache(const std::string& dbname, const Options& options,
                        int entries)
     : env_(options.env),

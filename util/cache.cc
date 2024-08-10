@@ -334,10 +334,13 @@ void LRUCache::Prune() {
 }
 
 static const int kNumShardBits = 4;
+// 即16
 static const int kNumShards = 1 << kNumShardBits;
 
+// LRU缓存实现类，包含了 LRUCache 数组
 class ShardedLRUCache : public Cache {
  private:
+  // LRUCache 数组，此处为16个
   LRUCache shard_[kNumShards];
   port::Mutex id_mutex_;
   uint64_t last_id_;
@@ -356,9 +359,11 @@ class ShardedLRUCache : public Cache {
     }
   }
   ~ShardedLRUCache() override {}
+  // 插入
   Handle* Insert(const Slice& key, void* value, size_t charge,
                  void (*deleter)(const Slice& key, void* value)) override {
     const uint32_t hash = HashSlice(key);
+    // 基于key对应的hash选择哪一个 LRUCache 来执行Insert操作
     return shard_[Shard(hash)].Insert(key, hash, value, charge, deleter);
   }
   Handle* Lookup(const Slice& key) override {
@@ -396,6 +401,7 @@ class ShardedLRUCache : public Cache {
 
 }  // end anonymous namespace
 
+// 传入entries（即990）
 Cache* NewLRUCache(size_t capacity) { return new ShardedLRUCache(capacity); }
 
 }  // namespace leveldb

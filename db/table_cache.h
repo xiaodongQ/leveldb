@@ -53,6 +53,7 @@ class TableCache {
   Env* const env_;
   const std::string dbname_;
   const Options& options_;
+  // Cache本身是一个抽象类，此处抽象指针用作多态
   Cache* cache_;
 };
 

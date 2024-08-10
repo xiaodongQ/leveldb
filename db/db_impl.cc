@@ -119,11 +119,14 @@ Options SanitizeOptions(const std::string& dbname,
   return result;
 }
 
+// 即默认 990
 static int TableCacheSize(const Options& sanitized_options) {
   // Reserve ten files or so for other uses and give the rest to TableCache.
+  // max_open_files默认是1000，这里保留10个文件
   return sanitized_options.max_open_files - kNumNonTableCacheFiles;
 }
 
+// 构造函数的初始化列表做了不少操作，比如：new了一个缓存类赋值给 table_cache_
 DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
     : env_(raw_options.env),
       internal_comparator_(raw_options.comparator),
@@ -133,7 +136,7 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       owns_info_log_(options_.info_log != raw_options.info_log),
       owns_cache_(options_.block_cache != raw_options.block_cache),
       dbname_(dbname),
-      table_cache_(new TableCache(dbname_, options_, TableCacheSize(options_))),
+      table_cache_(new TableCache(dbname_, options_, TableCacheSize(options_))),  // entries默认990
       db_lock_(nullptr),
       shutting_down_(false),
       background_work_finished_signal_(&mutex_),
