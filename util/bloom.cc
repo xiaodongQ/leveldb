@@ -27,26 +27,37 @@ class BloomFilterPolicy : public FilterPolicy {
 
   void CreateFilter(const Slice* keys, int n, std::string* dst) const override {
     // Compute bloom filter size (in both bits and bytes)
+    // n是key的个数，这里算出本次传入key需要占用的位数
     size_t bits = n * bits_per_key_;
 
     // For small n, we can see a very high false positive rate.  Fix it
     // by enforcing a minimum bloom filter length.
+    // 如果数组太短，会有很高的误判率，因此这里加了一个最小长度限定
     if (bits < 64) bits = 64;
 
+    // bits向上取整为8的倍数
     size_t bytes = (bits + 7) / 8;
     bits = bytes * 8;
 
+    // 布隆过滤器结果是一个简单的string，这里在原来基础上叠加本次要新增的数据长度
     const size_t init_size = dst->size();
     dst->resize(init_size + bytes, 0);
+    // 记录下哈希函数的个数，1个字节进行记录
     dst->push_back(static_cast<char>(k_));  // Remember # of probes in filter
+    // 指向string* 里原有数据的最后位置
     char* array = &(*dst)[init_size];
+    // 遍历处理本次所有的key
     for (int i = 0; i < n; i++) {
       // Use double-hashing to generate a sequence of hash values.
       // See analysis in [Kirsch,Mitzenmacher 2006].
+      // 使用double-hashing方法，仅使用一个 hash 函数来生成k个hash值，近似等价于k个hash函数的效果
       uint32_t h = BloomHash(keys[i]);
+      // 循环右移17bits作为步长
       const uint32_t delta = (h >> 17) | (h << 15);  // Rotate right 17 bits
       for (size_t j = 0; j < k_; j++) {
+        // 使用上面的hash值来生成k个位置进行设置
         const uint32_t bitpos = h % bits;
+        // 设置对应的bit, k次
         array[bitpos / 8] |= (1 << (bitpos % 8));
         h += delta;
       }

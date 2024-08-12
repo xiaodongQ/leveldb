@@ -1190,7 +1190,10 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {  // 找不到则在immutalbe table里找
       // Done
     } else {
-      // 上面都找不到则在current Version里找
+      // 上面都找不到则在current Version里找，根据布隆过滤器检查是否存在，若可能存在则去找缓存及sstable
+      // Version::Get -> 里面ForEachOverlapping会依次找各层，通过内部定义的回调函数State::Match具体处理 ->
+        // state->vset->table_cache_->Get 先基于布隆过滤器判断是否存在key，可能存在则继续往下找
+        // TableCache::Get -> t->InternalGet -> 先filter->KeyMayMatch，可能有则BlockReader()去找文件（文件是否在缓存，不在才去具体file找）
       s = current->Get(options, lkey, value, &stats);
       // 状态直接更新为true？
       have_stat_update = true;

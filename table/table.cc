@@ -221,10 +221,12 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
     Slice handle_value = iiter->value();
     FilterBlockReader* filter = rep_->filter;
     BlockHandle handle;
+    // 这里 KeyMayMatch 判断k是否存在，布隆过滤器中找不到则一定不存在
     if (filter != nullptr && handle.DecodeFrom(&handle_value).ok() &&
         !filter->KeyMayMatch(handle.offset(), k)) {
       // Not found
     } else {
+      // 继续找缓存或者文件
       Iterator* block_iter = BlockReader(this, options, iiter->value());
       block_iter->Seek(k);
       if (block_iter->Valid()) {

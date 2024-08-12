@@ -336,7 +336,6 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   stats->seek_file = nullptr;
   stats->seek_file_level = -1;
 
-  // 定义一个内部类（为什么要定义在函数体里面？）
   struct State {
     Saver saver;
     GetStats* stats;
@@ -362,8 +361,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       state->last_file_read = f;
       state->last_file_read_level = level;
 
-      // 从VersionSet中的缓存里查找，查找结果放在 saver 中
-      //  &state->saver传给：void* arg
+      // 里面先根据布隆过滤器判断key是否存在，可能存在再去看缓存、sstable
       state->s = state->vset->table_cache_->Get(*state->options, f->number,
                                                 f->file_size, state->ikey,
                                                 &state->saver, SaveValue);
@@ -407,7 +405,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   state.saver.user_key = k.user_key();
   state.saver.value = value;
 
-  // 根据key查找VersionSet，查询结果放在 state 的成员变量里，没有单独的返回值
+  // 依次查找各层是否存在key
   // 最后的参数是函数指针：State::Match，用于查找比较 InternalKey
   ForEachOverlapping(state.saver.user_key, state.ikey, &state, &State::Match);
 
